@@ -1,0 +1,43 @@
+"""Real local WebGL/HTTP integration; explicit clock fixtures, no production calls."""
+from playwright.sync_api import sync_playwright,expect
+from pathlib import Path
+import json
+ROOT=Path(__file__).resolve().parents[1];OUT=ROOT/'outputs';BASE='http://127.0.0.1:5173'
+with sync_playwright() as p:
+ b=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox','--enable-unsafe-swiftshader']);ctx=b.new_context(viewport={'width':1920,'height':1200});ctx.add_cookies([{'name':'__sites_local_auth','value':'1','url':BASE}]);page=ctx.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)));page.goto(BASE,wait_until='domcontentloaded');stage=page.locator('.office-3d-stage');expect(stage).to_have_attribute('data-ready','true',timeout=60000)
+ page.clock.set_fixed_time('2026-11-03T05:00:00Z');expect(stage).to_have_attribute('data-hour','12');page.get_by_label('คุณภาพภาพ',exact=True).select_option('low');expect(stage).to_have_attribute('data-quality','low');expect(stage).to_have_attribute('data-fireflies','0');day_sky=json.loads(stage.get_attribute('data-sky'))
+ before={k:stage.get_attribute('data-'+k) for k in ['fish','water','fall','animals','dog']};frame=int(stage.get_attribute('data-frames'));pos=page.locator('[data-agent=director]').get_attribute('data-world');page.wait_for_timeout(8500)
+ for k,v in before.items():assert v!=stage.get_attribute('data-'+k),k+' must animate'
+ page.wait_for_function("p=>document.querySelector('[data-agent=director]').dataset.world!==p",arg=pos,timeout=45000)
+ assert int(stage.get_attribute('data-frames'))>frame
+ page.get_by_role('button',name='หยุดภาพเคลื่อนไหว',exact=True).click();pause=stage.get_attribute('data-fish');page.wait_for_timeout(500);assert pause==stage.get_attribute('data-fish')
+ for zone,label in [('overview','ภาพรวม'),('floor1','ชั้น 1'),('floor2','ชั้น 2'),('garden','สวน')]:
+  page.get_by_role('button',name=label,exact=True).click();expect(stage).to_have_attribute('data-zone',zone);page.wait_for_timeout(400)
+  if zone=='floor2':assert page.locator('[data-agent]:visible').count()==0
+  if zone=='floor1':assert page.locator('[data-agent]:visible').count()==5
+  page.locator('.office-3d').screenshot(path=str(OUT/('campus-'+zone+'.png')))
+ # Stationary render for deterministic visible-mesh raycasts, separate from motion checks above.
+ page.close();page=ctx.new_page();page.emulate_media(reduced_motion='reduce');page.on('pageerror',lambda e:errors.append(str(e)));page.goto(BASE,wait_until='domcontentloaded');stage=page.locator('.office-3d-stage');expect(stage).to_have_attribute('data-ready','true',timeout=60000);page.clock.set_fixed_time('2026-11-03T05:00:00Z');expect(stage).to_have_attribute('data-hour','12')
+ page.get_by_role('button',name='ชั้น 1',exact=True).click();expect(stage).to_have_attribute('data-zone','floor1');stage.scroll_into_view_if_needed();rect=stage.locator('canvas').bounding_box()
+ selected=[]
+ for dept,name in [('director','Iron Man'),('development','Captain America'),('finance','Thor'),('marketing','Hulk'),('secretary','Spider-Man')]:
+  label=page.locator('[data-agent='+dept+']');x,y=map(float,label.get_attribute('data-pick').split(','));page.mouse.click(rect['x']+x,rect['y']+y);expect(label).to_have_attribute('aria-pressed','true');expect(page.locator('#chat-'+dept)).to_be_visible();expect(page.locator('.office-chat-identity')).to_contain_text(name);selected.append(dept)
+ # Projection alignment: each leader terminates at its character and labels stay inside the top edge.
+ for label in page.locator('[data-agent]:visible').all():
+  assert label.evaluate('(e)=>{const [ax,ay]=e.dataset.anchor.split(",").map(Number),x=parseFloat(e.style.left),y=parseFloat(e.style.top),h=parseFloat(e.style.getPropertyValue("--leader-height")),r=parseFloat(e.style.getPropertyValue("--leader-angle"));return Math.abs(x-Math.sin(r)*h-ax)<1&&Math.abs(y+Math.cos(r)*h-ay-8)<1&&y>=e.offsetHeight;}')
+ old=page.locator('[data-agent=director]').get_attribute('data-pick');page.mouse.move(rect['x']+rect['width']*.8,rect['y']+rect['height']*.8);page.mouse.down();page.mouse.move(rect['x']+rect['width']*.8+90,rect['y']+rect['height']*.8-35,steps=10);page.mouse.up();page.wait_for_timeout(600);assert old!=page.locator('[data-agent=director]').get_attribute('data-pick')
+ old=page.locator('[data-agent=director]').get_attribute('data-pick');page.get_by_role('button',name='ซูมเข้า',exact=True).click();page.wait_for_timeout(500);assert old!=page.locator('[data-agent=director]').get_attribute('data-pick');page.locator('.office-3d').screenshot(path=str(OUT/'campus-chibi.png'))
+ page.get_by_role('button',name='คืนมุมกล้อง',exact=True).click();page.get_by_role('button',name='ชั้น 2',exact=True).click();page.locator('[data-documents]').click();expect(page.get_by_role('dialog')).to_be_visible();page.get_by_role('button',name='ปิดรายการเอกสาร',exact=True).click()
+ # Selecting the already-selected employee still brings its floor back into view.
+ page.locator('[data-department=secretary]').click();expect(stage).to_have_attribute('data-zone','floor1');page.locator('.command-panel-tabs').get_by_role('button',name='กิจกรรม',exact=True).click();expect(page.locator('.command-activity')).to_be_visible();page.locator('.command-panel-tabs').get_by_role('button',name='แชท',exact=True).click();page.get_by_role('button',name='ยุบแชท',exact=True).click();expect(page.locator('.hq-inspector')).to_be_hidden();page.get_by_role('button',name='เปิดแชท',exact=True).click();expect(page.locator('.hq-inspector')).to_be_visible()
+ page.get_by_label('คุณภาพภาพ',exact=True).select_option('high');expect(stage).to_have_attribute('data-quality','high');page.get_by_label('คุณภาพภาพ',exact=True).select_option('medium');page.locator('.office-display').screenshot(path=str(OUT/'campus-chat.png'))
+ page.get_by_role('button',name='สวน',exact=True).click();page.clock.set_fixed_time('2026-11-03T14:00:00Z');expect(stage).to_have_attribute('data-hour','21');expect(stage).to_have_attribute('data-fireflies','20');night_sky=json.loads(stage.get_attribute('data-sky'));assert night_sky['night']>day_sky['night'];page.emulate_media(reduced_motion='no-preference');fly=stage.get_attribute('data-fly');page.wait_for_timeout(1200);assert fly!=stage.get_attribute('data-fly');page.get_by_role('button',name='หยุดภาพเคลื่อนไหว',exact=True).click();page.locator('.office-3d').screenshot(path=str(OUT/'campus-night-fireflies-simulated.png'))
+ # New reduced-motion page starts at desks, letting exact clock boundaries be tested without teleporting walking actors.
+ reduced=b.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True,reduced_motion='reduce');reduced.add_cookies([{'name':'__sites_local_auth','value':'1','url':BASE}]);m=reduced.new_page();m.on('pageerror',lambda e:errors.append(str(e)));m.goto(BASE,wait_until='domcontentloaded');ms=m.locator('.office-3d-stage');expect(ms).to_have_attribute('data-ready','true',timeout=60000)
+ for utc,hour,period in [('2026-11-03T17:00:00Z','0','sleep'),('2026-11-03T21:59:00Z','4','sleep'),('2026-11-03T22:00:00Z','5','open')]:
+  m.clock.set_fixed_time(utc);expect(ms).to_have_attribute('data-hour',hour);expect(ms).to_have_attribute('data-period',period)
+  if period=='sleep':assert m.locator('[data-agent][data-pose=sleeping]').count()==5
+ m.clock.set_fixed_time('2026-11-04T05:00:00Z');expect(ms).to_have_attribute('data-hour','12');assert m.evaluate('document.documentElement.scrollWidth<=innerWidth'),'mobile overflow';m.get_by_role('button',name='ชั้น 1',exact=True).click();m.locator('[data-department=development]').click();expect(m.locator('#chat-development')).to_be_visible();expect(m.locator('.command-roster')).to_be_hidden();m.locator('.office-3d').screenshot(path=str(OUT/'campus-mobile.png'))
+ pdf=ctx.request.get(BASE+'/api/reports?format=pdf');assert pdf.status==200 and pdf.body().startswith(b'%PDF');(OUT/'campus-report.pdf').write_bytes(pdf.body());assert not errors,errors
+ result={'realLocalApp':['WebGL frames','all zone controls and floor visibility','fish','water ripples','waterfall','livestock','dog','employee motion','pause','5 mesh raycast selections','chat identity','overhead label projection','camera orbit and zoom','BOSS document entry','activity tab','collapse/reopen chat','quality modes','mobile tabs and no overflow','PDF HTTP endpoint'],'simulated':['browser clock for daytime and night sky/fireflies','00:00, 04:59, 05:00 Bangkok visual boundaries'],'selected':selected,'pageErrors':errors,'gpu':'Chromium SwiftShader software rendering','productionVerified':False}
+ (OUT/'campus-browser-results.json').write_text(json.dumps(result,ensure_ascii=False,indent=2));print(json.dumps(result,ensure_ascii=False));b.close()

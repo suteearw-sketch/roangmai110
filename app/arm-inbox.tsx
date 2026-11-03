@@ -1,0 +1,23 @@
+'use client';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import {X,FileText,ArrowRight} from 'lucide-react';
+import {department,type CompanyState,type Item} from '@/lib/company';
+import {executiveText} from '@/lib/executive-text';
+import {executiveQueue,executiveTitle} from '@/lib/executive-queue';
+import {OutputViewer} from './ai-output';
+export function ArmInbox({data,open=false,onClose=()=>{}}:{data:CompanyState;open?:boolean;onClose?:()=>void}){
+ const [query,setQuery]=useState(''),[readFilter,setReadFilter]=useState('all'),[localRead,setLocalRead]=useState<string[]>([]),[readError,setReadError]=useState('');
+ const [opened,setOpened]=useState<Item|null>(null),[showAll,setShowAll]=useState(false),[tab,setTab]=useState('review');
+ const ref=useRef<HTMLDialogElement>(null);const q=useMemo(()=>executiveQueue(data.items),[data.items]);
+ const groups=[{id:'review',name:'ต้องตรวจ',rows:q.review},{id:'approvals',name:'ต้องเซ็น / อนุมัติ',rows:q.approvals},{id:'summaries',name:'สรุปเพื่อทราบ',rows:q.summaries}];
+ useEffect(()=>{if(open){setShowAll(true);setTab('review');}},[open]);
+ useEffect(()=>{if(showAll){ref.current?.showModal();}else ref.current?.close();},[showAll]);
+ function closeList(){setShowAll(false);onClose();}
+ const readIds=new Set([...(data.readDocuments??[]),...localRead]);
+ function read(i:Item){closeList();setOpened(i);void fetch('/api/documents/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:i.id,version:i.version})}).then(r=>{if(!r.ok)throw new Error('บันทึกว่าอ่านแล้วไม่สำเร็จ');setLocalRead(ids=>[...ids,i.id+':'+i.version]);}).catch(e=>setReadError(e.message));}
+ const matches=(i:Item)=>(i.title+' '+i.result).toLowerCase().includes(query.toLowerCase())&&(readFilter==='all'||(readFilter==='read')===readIds.has(i.id+':'+i.version));
+ const current=groups.find(g=>g.id===tab)??groups[0];
+ const first=q.approvals.find(i=>i.priority==='high')??q.review[0]??q.approvals[0];
+ const row=(i:Item,index:number)=><button className="arm-task-row" key={i.id} onClick={()=>read(i)}><span className="arm-task-order">{index+1}</span><span><strong>{executiveTitle(i)} · v{i.version} · {readIds.has(i.id+':'+i.version)?'อ่านแล้ว':'ยังไม่อ่าน'}</strong><small>{i.kind==='approvals'?'ข้อเสนอรอBOSSตัดสินใจ':department(i.department).short+'สรุปจากผู้จัดการ'} · {i.priority==='high'?'สำคัญสูง':'ปกติ'}{i.due?' · กำหนด '+i.due:''}{i.updatedAt?' · อัปเดต '+new Date(i.updatedAt).toLocaleDateString('th-TH',{timeZone:'Asia/Bangkok'}):''}</small><p>{executiveText(i.nextAction||i.result||i.description,180)}</p></span><ArrowRight size={20}/></button>;
+ return <section className="arm-inbox" aria-label="เอกสารหน้าห้อง BOSS"><h3>เอกสารของ BOSS</h3>{readError&&<p role="alert">{readError}</p>}{first?<div className="arm-start"><strong>เริ่มจากงานนี้</strong>{row(first,0)}</div>:<p>ยังไม่มีงานที่พร้อมให้BOSSตรวจ</p>}<div className="arm-trays">{groups.map(g=><button key={g.id} className="arm-tray-button" onClick={()=>{setTab(g.id);setShowAll(true);}}><FileText size={22}/><strong>{g.name}</strong><b>{g.rows.length}</b><small>กดดูรายการเต็มหน้า</small></button>)}</div><p className="arm-team-note">งานที่ทีมต้องทำต่อ {q.internal.length} งาน · เก็บสรุปรอบก่อน {q.history.length} งานไว้ในประวัติ</p><dialog ref={ref} className="arm-document-list" onCancel={e=>{e.preventDefault();closeList();}}><header><div><small>ห้อง BOSS</small><h2>เอกสารรอBOSS</h2></div><button className="icon-button" aria-label="ปิดรายการเอกสาร" onClick={closeList}><X/></button></header><div className="arm-list-body"><nav aria-label="หมวดเอกสาร">{groups.map(g=><button aria-pressed={tab===g.id} key={g.id} onClick={()=>setTab(g.id)}>{g.name} ({g.rows.length})</button>)}</nav><label>ค้นเอกสาร<input value={query} onChange={e=>setQuery(e.target.value)}/></label><label>สถานะอ่าน<select value={readFilter} onChange={e=>setReadFilter(e.target.value)}><option value="all">ทั้งหมด</option><option value="unread">ยังไม่อ่าน</option><option value="read">อ่านแล้ว</option></select></label><p>เรียงงานสำคัญสูงก่อน ตามด้วยกำหนดส่งและข้อมูลล่าสุด</p>{current.rows.filter(matches).map(row)}{!current.rows.length&&<p className="arm-empty">ไม่มีรายการในหมวดนี้</p>}<details><summary>สรุปรอบก่อน ({q.history.length})</summary>{q.history.map(row)}</details></div></dialog>{opened&&<OutputViewer document={{taskId:opened.id,title:executiveTitle(opened),department:opened.department,content:opened.result||opened.description,nextAction:opened.nextAction,status:opened.kind==='approvals'?'รอการตัดสินใจ · ยังไม่อนุมัติ':opened.status==='done'?'สรุปเพื่อทราบ':'รอตรวจ',updatedAt:opened.updatedAt}} onClose={()=>setOpened(null)}/>}</section>;
+}

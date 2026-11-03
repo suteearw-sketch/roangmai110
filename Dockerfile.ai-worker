@@ -1,0 +1,5 @@
+FROM node:24-alpine
+WORKDIR /app
+COPY scripts/ai-worker.mjs ./ai-worker.mjs
+USER node
+CMD ["node", "ai-worker.mjs"]

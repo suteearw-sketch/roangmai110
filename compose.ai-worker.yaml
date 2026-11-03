@@ -1,0 +1,20 @@
+services:
+  ai-receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai-worker
+    env_file: .env.ai-worker
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'

@@ -1,0 +1,11 @@
+import {registerHooks} from 'node:module';
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(s.startsWith('.')&&!s.endsWith('.ts'))return n(s+'.ts',c);throw e;}}});
+const {secretaryStatus}=await import('../lib/secretary-status.ts');
+const {itemSchema}=await import('../lib/company.ts');
+const make=(id:string,department:string,status:string)=>({...itemSchema.parse({id,kind:'tasks',title:id,department,status,result:status==='done'?'ตรวจแล้ว':'',sourceStatus:'confirmed'}),version:1});
+const records=[make('f-review','finance','review'),make('f-done','finance','done'),make('m-blocked','marketing','blocked'),make('d-doing','development','doing')];
+test('secretary filters department and review without claiming completed work',()=>{const r=secretaryStatus('การเงินมีงานรอตรวจอะไรบ้าง',records);assert.deepEqual(r.matches.map(i=>i.id),['f-review']);assert.equal(r.total,2);assert.equal(r.counts.done,1);});
+test('secretary returns blockers across departments and handles empty results',()=>{assert.deepEqual(secretaryStatus('มีงานติดขัดอะไรบ้าง',records).matches.map(i=>i.id),['m-blocked']);assert.equal(secretaryStatus('เลขารอตรวจ',records).matches.length,0);assert.deepEqual(secretaryStatus('พัฒนากำลังทำ',records).matches.map(i=>i.id),['d-doing']);});
+test('query does not mutate records or include unrelated registers',()=>{const before=JSON.stringify(records);const other={...records[0],kind:'leads' as const};assert.equal(secretaryStatus('ทุกฝ่าย', [...records,other]).total,4);assert.equal(JSON.stringify(records),before);});
